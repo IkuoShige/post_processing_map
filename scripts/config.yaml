@@ -1,0 +1,59 @@
+# PLY Height Adjustment Configuration
+# ====================================
+
+# Input/Output paths
+input_ply: "/root/ros2_ws/src/post-processing-map/map/tsukuba_all_2025.ply"
+output_ply: "/root/ros2_ws/src/post-processing-map/map/tsukuba_adjusted.ply"
+
+# Reference plane height for visualization (z coordinate)
+# Point cloud Z range: [-4.78, 68.14]
+reference_height: 0.0
+
+# Visualization settings
+visualization:
+  enabled: true
+  colormap: "coolwarm"  # Options: coolwarm, jet, viridis, RdBu
+  color_range: [-5.0, 5.0]  # Height difference range [min, max] in meters
+  downsample_voxel_size: 0.05  # Voxel size for downsampling (null for full resolution)
+  show_region_bounds: true  # Show wireframe boxes around adjustment regions
+
+  # PGM image projection settings (optional)
+  # Projects a PGM image as a reference plane at the specified height
+  pgm:
+    enabled: true
+    # Specify yaml_path to auto-load image, resolution, and origin from ROS map.yaml
+    yaml_path: "/root/ros2_ws/src/post-processing-map/map/navigation_map.yaml"
+    # Auto-align: automatically compute rotation and offset to align PGM with PLY
+    auto_align: true
+    # Manual settings (used only if auto_align is false or yaml_path is not set):
+    # path: "/path/to/map.pgm"
+    # resolution: 0.2
+    # origin_x: 0.0
+    # origin_y: 0.0
+    rotate_180: false
+    # offset_x: 0.0
+    # offset_y: 0.0
+    alpha: 0.5  # Opacity (0.0 = transparent/white, 1.0 = fully visible)
+
+# Rectangular adjustment regions
+# Each region defines an area where z-offset will be applied
+# - name: Descriptive name for the region
+# - xmin, xmax: X coordinate bounds (data range: -132.22 to 661.83)
+# - ymin, ymax: Y coordinate bounds (data range: -330.40 to 192.98)
+# - z_offset: Value to add to z-coordinates (positive = raise, negative = lower)
+regions:
+  # Example region - modify coordinates based on your actual data
+  - name: "sample_region_1"
+    xmin: 140.0
+    xmax: 290.0
+    ymin: -50.0
+    ymax: 80.0
+    z_offset: 0.5  # Raise by 0.5m
+
+  # Add more regions as needed:
+  # - name: "another_region"
+  #   xmin: 100.0
+  #   xmax: 200.0
+  #   ymin: -50.0
+  #   ymax: 50.0
+  #   z_offset: 0.3
