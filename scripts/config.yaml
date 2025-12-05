@@ -3,6 +3,7 @@
 
 # Input/Output paths
 input_ply: "/root/ros2_ws/src/post-processing-map/map/tsukuba_all_2025.ply"
+input_ply: "/tsukuba_all_2025_fusion.ply"
 output_ply: "/root/ros2_ws/src/post-processing-map/map/tsukuba_adjusted.ply"
 
 # Reference plane height for visualization (z coordinate)
@@ -57,3 +58,28 @@ regions:
   #   ymin: -50.0
   #   ymax: 50.0
   #   z_offset: 0.3
+
+# Polygon adjustment regions (arbitrary shape)
+# Each polygon defines a closed region using vertices
+# - name: Descriptive name
+# - vertices: List of {x, y} coordinates (minimum 3 points)
+# - z_offset: Value to add to z-coordinates
+polygon_regions:
+  # Example: Triangle region
+  # - name: "triangle_area"
+  #   z_offset: 0.3
+  #   vertices:
+  #     - {x: 100.0, y: 50.0}
+  #     - {x: 150.0, y: 100.0}
+  #     - {x: 100.0, y: 150.0}
+
+  # Example: Complex polygon (5 vertices)
+  - name: "complex_area"
+    z_offset: 1.0
+    vertices:
+      - {x: -60.0, y: 105.0}
+      - {x: 60.0, y: 105.0}
+      - {x: 60.0, y: 45.0}
+      - {x: 30.0, y: 45.0}
+      - {x: 28.0, y: 80.0}
+      - {x: -60.0, y: 80.0}
