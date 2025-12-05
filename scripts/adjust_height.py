@@ -17,6 +17,7 @@ import yaml
 import numpy as np
 import open3d as o3d
 import matplotlib.cm as cm
+from matplotlib.path import Path as MplPath
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
 import time
@@ -36,6 +37,14 @@ class AdjustmentRegion:
     xmax: float
     ymin: float
     ymax: float
+    z_offset: float
+
+
+@dataclass
+class PolygonRegion:
+    """Defines a polygon region with height adjustment."""
+    name: str
+    vertices: List[Tuple[float, float]]  # [(x1,y1), (x2,y2), ...]
     z_offset: float
 
 
@@ -73,6 +82,7 @@ class Config:
     output_ply: str
     reference_height: float = 0.0
     regions: List[AdjustmentRegion] = field(default_factory=list)
+    polygon_regions: List[PolygonRegion] = field(default_factory=list)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
 
 
@@ -249,6 +259,16 @@ def load_config(config_path: str) -> Config:
         AdjustmentRegion(**r) for r in data.get('regions', [])
     ]
 
+    # Load polygon regions
+    polygon_regions = []
+    for p in data.get('polygon_regions', []):
+        vertices = [(v['x'], v['y']) for v in p['vertices']]
+        polygon_regions.append(PolygonRegion(
+            name=p['name'],
+            vertices=vertices,
+            z_offset=p['z_offset']
+        ))
+
     vis_data = data.get('visualization', {})
 
     # Load PGM config
@@ -300,6 +320,7 @@ def load_config(config_path: str) -> Config:
         output_ply=data['output_ply'],
         reference_height=data.get('reference_height', 0.0),
         regions=regions,
+        polygon_regions=polygon_regions,
         visualization=vis_config
     )
 
@@ -361,23 +382,46 @@ def get_region_mask(points: np.ndarray, region: AdjustmentRegion) -> np.ndarray:
     )
 
 
+def get_polygon_mask(points: np.ndarray, polygon: PolygonRegion) -> np.ndarray:
+    """
+    Create boolean mask for points within polygon region.
+
+    Uses matplotlib Path for efficient point-in-polygon testing.
+
+    Args:
+        points: Nx3 array of point coordinates
+        polygon: PolygonRegion object with vertices
+
+    Returns:
+        Boolean mask array
+    """
+    path = MplPath(polygon.vertices)
+    return path.contains_points(points[:, :2])
+
+
 def adjust_heights(points: np.ndarray,
                    regions: List[AdjustmentRegion],
+                   polygon_regions: List[PolygonRegion] = None,
                    verbose: bool = True) -> np.ndarray:
     """
     Apply z-offset adjustments to points within specified regions.
 
     Args:
         points: Nx3 array of point coordinates
-        regions: List of AdjustmentRegion objects
+        regions: List of AdjustmentRegion objects (rectangular)
+        polygon_regions: List of PolygonRegion objects (polygon)
         verbose: Print progress information
 
     Returns:
         Adjusted points array (copy of original with modifications)
     """
+    if polygon_regions is None:
+        polygon_regions = []
+
     adjusted = points.copy()
     total_adjusted = 0
 
+    # Process rectangular regions
     for region in regions:
         mask = get_region_mask(points, region)
         count = np.sum(mask)
@@ -387,6 +431,17 @@ def adjust_heights(points: np.ndarray,
         if verbose:
             print(f"  Region '{region.name}': {count:,} points, "
                   f"offset {region.z_offset:+.3f}m")
+
+    # Process polygon regions
+    for polygon in polygon_regions:
+        mask = get_polygon_mask(points, polygon)
+        count = np.sum(mask)
+        adjusted[mask, 2] += polygon.z_offset
+        total_adjusted += count
+
+        if verbose:
+            print(f"  Polygon '{polygon.name}': {count:,} points, "
+                  f"offset {polygon.z_offset:+.3f}m")
 
     if verbose:
         print(f"Total points adjusted: {total_adjusted:,}")
@@ -651,6 +706,49 @@ def create_region_wireframe(region: AdjustmentRegion,
     return line_set
 
 
+def create_polygon_wireframe(polygon: PolygonRegion,
+                              zmin: float, zmax: float) -> o3d.geometry.LineSet:
+    """
+    Create wireframe prism for polygon region visualization.
+
+    Args:
+        polygon: PolygonRegion object with vertices
+        zmin, zmax: Z coordinate range for the prism
+
+    Returns:
+        Open3D LineSet geometry
+    """
+    n = len(polygon.vertices)
+    if n < 3:
+        return None
+
+    # Create vertices for bottom and top faces
+    vertices = []
+    for x, y in polygon.vertices:
+        vertices.append([x, y, zmin])  # Bottom face
+    for x, y in polygon.vertices:
+        vertices.append([x, y, zmax])  # Top face
+
+    # Create edges
+    lines = []
+    # Bottom face edges
+    for i in range(n):
+        lines.append([i, (i + 1) % n])
+    # Top face edges
+    for i in range(n):
+        lines.append([n + i, n + (i + 1) % n])
+    # Vertical edges
+    for i in range(n):
+        lines.append([i, n + i])
+
+    line_set = o3d.geometry.LineSet()
+    line_set.points = o3d.utility.Vector3dVector(np.array(vertices))
+    line_set.lines = o3d.utility.Vector2iVector(np.array(lines))
+    line_set.paint_uniform_color([0, 1, 0])  # Green for polygon regions
+
+    return line_set
+
+
 def visualize(pcd: o3d.geometry.PointCloud,
               config: Config) -> None:
     """
@@ -697,11 +795,17 @@ def visualize(pcd: o3d.geometry.PointCloud,
         geometries.append(ref_grid)
 
     # Add region wireframes
-    if vis_config.show_region_bounds and config.regions:
+    if vis_config.show_region_bounds:
         zmin, zmax = points[:, 2].min(), points[:, 2].max()
+        # Rectangular regions (red)
         for region in config.regions:
             wireframe = create_region_wireframe(region, zmin, zmax)
             geometries.append(wireframe)
+        # Polygon regions (green)
+        for polygon in config.polygon_regions:
+            wireframe = create_polygon_wireframe(polygon, zmin, zmax)
+            if wireframe is not None:
+                geometries.append(wireframe)
 
     # Print color legend
     vmin, vmax = vis_config.color_range
@@ -779,7 +883,8 @@ def main():
     print(f"Input:  {config.input_ply}")
     print(f"Output: {config.output_ply}")
     print(f"Reference height: {config.reference_height}m")
-    print(f"Regions to adjust: {len(config.regions)}")
+    print(f"Rectangular regions: {len(config.regions)}")
+    print(f"Polygon regions: {len(config.polygon_regions)}")
 
     # Load point cloud
     print("\n" + "-" * 40)
@@ -795,10 +900,11 @@ def main():
     print(f"Z range: [{points[:, 2].min():.2f}, {points[:, 2].max():.2f}]")
 
     # Apply adjustments
-    if config.regions:
+    total_regions = len(config.regions) + len(config.polygon_regions)
+    if total_regions > 0:
         print("\n" + "-" * 40)
-        print(f"Applying {len(config.regions)} region adjustments:")
-        adjusted_points = adjust_heights(points, config.regions)
+        print(f"Applying {total_regions} region adjustments:")
+        adjusted_points = adjust_heights(points, config.regions, config.polygon_regions)
         pcd.points = o3d.utility.Vector3dVector(adjusted_points)
     else:
         print("\nNo regions defined, skipping adjustment")
