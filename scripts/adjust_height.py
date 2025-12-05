@@ -318,14 +318,31 @@ def load_point_cloud(filepath: str) -> o3d.geometry.PointCloud:
 
 
 def save_point_cloud(pcd: o3d.geometry.PointCloud, filepath: str) -> None:
-    """Save point cloud to PLY file (binary format)."""
+    """Save point cloud to PLY file (binary format with float32)."""
     # Ensure output directory exists
     Path(filepath).parent.mkdir(parents=True, exist_ok=True)
 
-    success = o3d.io.write_point_cloud(filepath, pcd, write_ascii=False)
-    if not success:
-        raise IOError(f"Failed to save point cloud to {filepath}")
-    print(f"Saved: {filepath}")
+    # Get points as float32 (Open3D uses float64 internally which doubles file size)
+    points = np.asarray(pcd.points).astype(np.float32)
+    num_points = len(points)
+
+    # Write binary PLY manually to ensure float32 format
+    with open(filepath, 'wb') as f:
+        # Write header
+        header = f"""ply
+format binary_little_endian 1.0
+element vertex {num_points}
+property float x
+property float y
+property float z
+end_header
+"""
+        f.write(header.encode('ascii'))
+
+        # Write binary point data (float32)
+        points.tofile(f)
+
+    print(f"Saved: {filepath} ({num_points:,} points, float32)")
 
 
 # ============================================================================
